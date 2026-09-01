@@ -347,8 +347,8 @@ When both services show a green dot:
 
 📋 Save that as **#6 Kitchen web address**.
 
-⚠️ If Render gave it a different name (like `hirehq-api-a1b2`), go to **Env Groups** →
-`hirehq-shared` and correct `BACKEND_BASE_URL` to match.
+⚠️ If Render gave it a different name (like `hirehq-api-a1b2`), open **hirehq-api** →
+**Environment** and correct `BACKEND_BASE_URL` to match.
 
 **Test it.** Paste your #6 address into a browser and add `/health` on the end:
 
@@ -437,11 +437,14 @@ could talk to your kitchen.)
 Let's fix that:
 
 1. Go back to [Render](https://dashboard.render.com)
-2. Left menu → **Env Groups** → click **hirehq-shared**
+2. Click your **hirehq-api** service → **Environment** tab
 3. Find `FRONTEND_BASE_URL` and change `https://temporary.vercel.app` to your **#7 Shop
    web address**
 4. Find `CORS_ORIGINS` and change it to the same **#7** address
 5. Click **Save Changes**
+
+The helper service copies `FRONTEND_BASE_URL` from the kitchen automatically, so you only
+edit it in this one place.
 
 ⚠️ **Type it exactly.** No slash `/` on the end. Must start with `https://` not `http://`.
 
@@ -548,6 +551,7 @@ up next to it.
 
 | What you see | What's wrong | Fix |
 | --- | --- | --- |
+| `JWT_SECRET must be set to a strong value` | Render didn't pass ANY settings to the kitchen | Open **hirehq-api** → **Environment**. If it's nearly empty, see the box below this table |
 | Site loads but nothing works. Errors have no number. | The kitchen doesn't recognise the shop. | Part 8 — check for a `/` on the end |
 | `unexpected keyword argument 'sslmode'` | Database address not edited | Part 2.4 — remove `?sslmode=require` |
 | `relation "users" does not exist` | Filing cabinet has no drawers | Part 5 |
@@ -558,6 +562,47 @@ up next to it.
 | No emails ever arrive; it says "Not sent" | Email isn't set up | Correct — it's being honest. See below |
 | First visit takes ~50 seconds | Free service was asleep | Normal on free. Upgrade or accept it |
 
+### If the kitchen says "JWT_SECRET must be set to a strong value"
+
+This message is misleading. It doesn't mean your secret is weak — it means Render gave the
+kitchen **no settings at all**, so it fell back to the built-in placeholder.
+
+**Check:** Render → **hirehq-api** → **Environment** tab. Nearly empty? That's the problem.
+
+**Fix:** add them by hand. On that same Environment tab click **Add Environment Variable**
+for each row below. First, make a secret by running this on your computer:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+| Name | Value |
+| --- | --- |
+| `JWT_SECRET` | the long string you just generated |
+| `DATABASE_URL` | your **#1** |
+| `REDIS_URL` | your **#2** |
+| `STORAGE_ENDPOINT` | your **#3** |
+| `STORAGE_ACCESS_KEY` | your **#4** |
+| `STORAGE_SECRET_KEY` | your **#5** |
+| `USE_REDIS_QUEUE` | `true` |
+| `USE_REDIS_CACHE` | `true` |
+| `STORAGE_PROVIDER` | `s3` |
+| `STORAGE_BUCKET` | `hirehq` |
+| `STORAGE_REGION` | `auto` |
+| `STORAGE_SERVER_SIDE_ENCRYPTION` | *leave the value box empty* |
+| `DEBUG` | `false` |
+| `WEB_CONCURRENCY` | `2` |
+| `BACKEND_BASE_URL` | your **#6** |
+| `FRONTEND_BASE_URL` | your **#7** (or `https://temporary.vercel.app` for now) |
+| `CORS_ORIGINS` | same as `FRONTEND_BASE_URL` |
+
+Click **Save Changes**. Render restarts it automatically.
+
+Do the same for **hirehq-worker**, but skip `CORS_ORIGINS` and `WEB_CONCURRENCY`.
+
+⚠️ The worker's `JWT_SECRET` must be the **exact same string** as the kitchen's. Copy and
+paste it — don't generate a second one.
+
 ---
 
 # Optional — turning on extra features
@@ -565,8 +610,8 @@ up next to it.
 Everything below is optional. Without them, HireHQ **tells you** they're off rather than
 pretending they work.
 
-To add any of these: Render → **Env Groups** → **hirehq-shared** → add the settings →
-**Save**.
+To add any of these: Render → **Env Groups** → **hirehq-config** → add the settings →
+**Save**. Both services pick them up.
 
 ### Sending real emails
 
@@ -599,7 +644,7 @@ AI_API_KEY=your-key-from-anthropic
 ### Your own web address (like careers.yourcompany.com)
 
 1. Vercel → your project → **Settings** → **Domains** → add it, and follow the DNS steps
-2. ⚠️ Then go to Render → **Env Groups** → **hirehq-shared** and add the new address to
+2. ⚠️ Then go to Render → **hirehq-api** → **Environment** and add the new address to
    **both** `CORS_ORIGINS` and `FRONTEND_BASE_URL`, separated by a comma:
 
    ```

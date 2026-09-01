@@ -359,16 +359,17 @@ in your server logs to show for it. The build refuses rather than shipping that.
 Two values on the backend must now become the real Vercel URL. Until they do, the site
 loads but every request fails.
 
-Render → **Env Groups** → `hirehq-shared` → edit:
+Render → your **hirehq-api** service → **Environment** → edit:
 
 ```env
 FRONTEND_BASE_URL=https://hirehq-<hash>.vercel.app
 CORS_ORIGINS=https://hirehq-<hash>.vercel.app
 ```
 
-Editing the group updates **both** services at once — which is the point of the group.
-`FRONTEND_BASE_URL` is what builds the links inside offer emails, assessment invitations
-and password resets, and the worker sends those, so both genuinely need it.
+The worker pulls `FRONTEND_BASE_URL` from the API by reference, so editing it here
+updates both. That matters because `FRONTEND_BASE_URL` builds the links inside offer
+emails, assessment invitations and password resets — and the worker is what sends those.
+`CORS_ORIGINS` is API-only; the worker serves no HTTP.
 
 Rules that catch people out:
 
@@ -477,7 +478,7 @@ design, not a gap.
 
 Without SMTP, password resets, verification links, interview invitations and offer emails
 are recorded but never delivered, and the UI reports "Not sent". Use Resend, Postmark,
-SendGrid or Mailgun, then add to the **`hirehq-shared` env group** so both services get it:
+SendGrid or Mailgun, then add to the **`hirehq-config` env group** so both services get it:
 
 ```env
 EMAIL_PROVIDER=smtp
@@ -545,7 +546,7 @@ For the API on a subdomain: Render → service → **Settings → Custom Domains
 | Every request fails, **no HTTP status** in the network tab | CORS. `CORS_ORIGINS` does not exactly match the Vercel origin — check trailing slash and `https`. Use the `curl -X OPTIONS` check in step 9. |
 | Requests go to `localhost:8000` | `NEXT_PUBLIC_API_URL` was wrong **at build time**. Fix it and **redeploy** — editing the variable alone changes nothing. |
 | Vercel build fails: `NEXT_PUBLIC_API_URL is not set` | Working as intended. Set it in Vercel → Settings → Environment Variables, then redeploy. |
-| Service exits: `JWT_SECRET must be set to a strong value` | The env group is not attached, or was overridden. Confirm both services list `hirehq-shared`. |
+| Service exits: `JWT_SECRET must be set to a strong value` | **No environment variables reached the container.** Open the service's **Environment** tab — if it is nearly empty, the Blueprint did not apply. See [When no variables arrive](#when-no-variables-arrive). |
 | Service exits: `STORAGE_PROVIDER=local is a development-only backend` | The storage variables did not reach the service. Check the env group. |
 | `TypeError: connect() got an unexpected keyword argument 'sslmode'` | `?sslmode=require` is still on `DATABASE_URL`. Remove it (step 2). |
 | `relation "users" does not exist` | Migrations never ran. Step 5. |
@@ -555,6 +556,76 @@ For the API on a subdomain: Render → service → **Settings → Custom Domains
 | Live badge stuck on "Not live" | The SSE stream was refused. Usually CORS; occasionally a proxy buffering `text/event-stream`. |
 | First request after a quiet period takes ~50 s | A free Render instance woke from sleep. Upgrade to Starter, or accept it. |
 | First request is slow but Render is on Starter | Neon's free tier scaled to zero. Expected. |
+
+---
+
+## When no variables arrive
+
+Symptom — the service exits immediately with:
+
+```
+pydantic_core._pydantic_core.ValidationError: 1 validation error for Settings
+  Value error, JWT_SECRET must be set to a strong value (>=32 chars) when APP_ENV=production
+  [type=value_error, input_value={'APP_ENV': 'production'}, input_type=dict]
+```
+
+**Read `input_value`.** That dict is every environment variable the app actually found. If
+it contains only `APP_ENV`, the answer is not "JWT_SECRET is weak" — it is that *nothing*
+reached the container. `APP_ENV=production` is baked into the Dockerfile, so it is present
+even when Render supplies nothing at all.
+
+Confirm it: open the service → **Environment** tab. If it is nearly empty, the Blueprint
+did not apply its variables.
+
+### Fix it now, without redeploying from git
+
+Open the service → **Environment** → **Add Environment Variable**, and add each of these.
+Generate the secret first:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+| Key | Value |
+| --- | --- |
+| `JWT_SECRET` | the generated string |
+| `DATABASE_URL` | your `postgresql+asyncpg://…` URL |
+| `REDIS_URL` | your `rediss://…` URL |
+| `USE_REDIS_QUEUE` | `true` |
+| `USE_REDIS_CACHE` | `true` |
+| `STORAGE_PROVIDER` | `s3` |
+| `STORAGE_BUCKET` | `hirehq` |
+| `STORAGE_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
+| `STORAGE_ACCESS_KEY` | R2 access key id |
+| `STORAGE_SECRET_KEY` | R2 secret access key |
+| `STORAGE_REGION` | `auto` |
+| `STORAGE_SERVER_SIDE_ENCRYPTION` | *(leave empty)* |
+| `DEBUG` | `false` |
+| `LOG_JSON` | `true` |
+| `WEB_CONCURRENCY` | `2` |
+| `BACKEND_BASE_URL` | this service's own URL |
+| `FRONTEND_BASE_URL` | your Vercel URL |
+| `CORS_ORIGINS` | your Vercel URL |
+
+Save; Render redeploys automatically. The worker needs the same set **except**
+`CORS_ORIGINS` and `WEB_CONCURRENCY`, and its `JWT_SECRET` **must be the identical
+string** — it derives the encryption key for stored OAuth tokens, so two different values
+would leave the worker unable to decrypt what the API wrote.
+
+### Why it happened
+
+Render's `envVarGroups` accept **only literal `key`/`value` pairs**. `sync: false` (prompt
+me at deploy time) and `generateValue` are **service-level** features and are not valid
+inside a group. A blueprint that puts them there produces a group that never populates,
+and services that start with no configuration.
+
+`render.yaml` in this repository was corrected for exactly this: the group now holds only
+literal settings, secrets sit on the API service with `sync: false`, `JWT_SECRET` uses
+`generateValue` on the API, and the worker pulls every shared value across with
+`fromService` so the two cannot drift apart.
+
+If you deployed before that fix, either add the variables by hand as above, or push the
+corrected file and re-sync the Blueprint from the Render dashboard.
 
 ---
 
