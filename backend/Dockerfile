@@ -72,7 +72,22 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 #
 # --proxy-headers so client IPs and scheme are read from the reverse proxy rather than
 # the proxy's own address, which matters for rate limiting and audit logs.
-CMD ["sh", "-c", "exec uvicorn app.main:app \
-     --host 0.0.0.0 --port ${PORT} \
-     --proxy-headers --forwarded-allow-ips '*' \
-     --workers ${WEB_CONCURRENCY}"]
+#
+# One worker means one process, with no --workers flag and so no supervisor at all. That
+# is deliberate beyond saving memory: uvicorn's multi-worker supervisor *restarts* a
+# child that dies, so a worker crashing on import - a bad DATABASE_URL, a missing
+# JWT_SECRET - becomes an endless fork/die loop that logs only "Child process [N] died"
+# and buries the traceback that explains it. The platform sees a port that never opens
+# and reports "Timed Out", which says nothing about the actual fault. Single process:
+# the container exits with the real error on the last line, where it can be read.
+CMD echo "hirehq: uvicorn on port ${PORT:-8000}, workers=${WEB_CONCURRENCY:-1}" && \
+    if [ "${WEB_CONCURRENCY:-1}" -gt 1 ] 2>/dev/null; then \
+        exec uvicorn app.main:app \
+            --host 0.0.0.0 --port "${PORT:-8000}" \
+            --proxy-headers --forwarded-allow-ips '*' \
+            --workers "${WEB_CONCURRENCY}"; \
+    else \
+        exec uvicorn app.main:app \
+            --host 0.0.0.0 --port "${PORT:-8000}" \
+            --proxy-headers --forwarded-allow-ips '*'; \
+    fi
