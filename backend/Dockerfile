@@ -54,8 +54,13 @@ USER hirehq
 
 # Managed hosts (Railway, Render, Fly, Cloud Run) assign a port at runtime and inject it
 # as $PORT. Defaulting to 8000 keeps docker-compose and local runs unchanged.
+# One worker by default. Each one loads the full application (SQLAlchemy, the provider
+# SDKs, the parsers), so several will exhaust a small instance's memory during startup -
+# which a host reports as an opaque "deploy timed out". A single worker handles a lot of
+# concurrent I/O because everything here is async; raise this deliberately once you know
+# the instance has the memory for it.
 ENV PORT=8000 \
-    WEB_CONCURRENCY=4
+    WEB_CONCURRENCY=1
 
 EXPOSE 8000
 

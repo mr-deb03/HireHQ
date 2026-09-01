@@ -5,6 +5,7 @@ From Application to Hire - Automated.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -30,6 +31,11 @@ from app.providers.storage import get_storage
 from app.services.subscribers import register_subscribers
 
 logger = get_logger(__name__)
+
+#: How long startup will wait for the database before serving anyway. Comfortably longer
+#: than a scale-to-zero Postgres cold start, comfortably shorter than the port-scan
+#: timeout a hosting platform applies before declaring the deploy failed.
+STARTUP_DB_TIMEOUT_SECONDS = 20
 
 DESCRIPTION = """
 **HireHQ** is an AI-assisted applicant tracking system, job portal and recruitment
@@ -91,9 +97,38 @@ async def lifespan(app: FastAPI):
         database=settings.DATABASE_URL.split("://")[0],
     )
 
-    await ensure_schema()
-    async with session_scope() as session:
-        await bootstrap_database(session)
+    # Bounded and non-fatal. A hosting platform decides a service is dead when it does
+    # not open its port in time, so blocking startup on an unreachable or sleeping
+    # database turns a clear problem ("cannot connect") into an opaque one ("deploy timed
+    # out"). Start anyway: /health reports the database as down, which is the truth and is
+    # far easier to act on than a timeout.
+    app.state.database_ready = False
+    try:
+        async with asyncio.timeout(STARTUP_DB_TIMEOUT_SECONDS):
+            await ensure_schema()
+            async with session_scope() as session:
+                await bootstrap_database(session)
+        app.state.database_ready = True
+    except TimeoutError:
+        logger.error(
+            "startup_database_timeout",
+            seconds=STARTUP_DB_TIMEOUT_SECONDS,
+            detail=(
+                "The database did not respond during startup. Serving anyway so the "
+                "problem is visible at /health. Check DATABASE_URL - it must use the "
+                "+asyncpg driver and must not carry ?sslmode=require."
+            ),
+        )
+    except Exception as exc:
+        logger.error(
+            "startup_database_failed",
+            error=str(exc)[:400],
+            detail=(
+                "Could not prepare the database during startup. Serving anyway so the "
+                "problem is visible at /health. If this says 'relation does not exist', "
+                "the migrations have not been run: alembic upgrade head."
+            ),
+        )
 
     register_subscribers()
 

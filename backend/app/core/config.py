@@ -177,18 +177,65 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> Settings:
-        if self.APP_ENV == "production":
-            if self.JWT_SECRET == DEV_JWT_SECRET or len(self.JWT_SECRET) < 32:
-                raise ValueError(
-                    "JWT_SECRET must be set to a strong value (>=32 chars) when APP_ENV=production"
-                )
-            if self.DEBUG:
-                raise ValueError("DEBUG must be false when APP_ENV=production")
-            if self.STORAGE_PROVIDER == "local":
-                raise ValueError(
-                    "STORAGE_PROVIDER=local is a development-only backend; "
-                    "configure S3-compatible storage for production"
-                )
+        if self.APP_ENV != "production":
+            return self
+
+        # `APP_ENV=production` is baked into the container image, so it is set even when
+        # the host supplies no configuration whatsoever. When that happens every
+        # production check fails at once, and reporting only the first one sends people
+        # hunting for a secrets problem they do not have. Detect the real cause instead.
+        untouched = [
+            name
+            for name, is_default in (
+                ("JWT_SECRET", self.JWT_SECRET == DEV_JWT_SECRET),
+                ("DATABASE_URL", self.DATABASE_URL.startswith("sqlite")),
+                ("STORAGE_PROVIDER", self.STORAGE_PROVIDER == "local"),
+                ("REDIS_URL", self.REDIS_URL == "redis://localhost:6379/0"),
+                ("CORS_ORIGINS", "localhost" in self.CORS_ORIGINS),
+            )
+            if is_default
+        ]
+        if len(untouched) >= 4:
+            raise ValueError(
+                "No configuration reached this container - every core setting is still "
+                "at its development default ("
+                + ", ".join(untouched)
+                + "). This is a deployment problem, not a bad secret: the host is not "
+                "passing environment variables to the process.\n"
+                "  * Render: open the service -> Environment. If it is empty or the "
+                "values are blank, fill them in there. Blueprint variables marked "
+                "'sync: false' are created without a value and must be set by hand.\n"
+                "  * Docker: pass --env-file .env, or -e for each variable.\n"
+                "See DEPLOY-SIMPLE.md or DEPLOYMENT.md for the full list."
+            )
+
+        # Otherwise report every problem at once, so fixing them is not a guessing game
+        # one redeploy at a time.
+        problems: list[str] = []
+        if self.JWT_SECRET == DEV_JWT_SECRET:
+            problems.append(
+                "JWT_SECRET is still the development placeholder. Generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
+        elif len(self.JWT_SECRET) < 32:
+            problems.append(
+                f"JWT_SECRET is only {len(self.JWT_SECRET)} characters; it must be at "
+                "least 32."
+            )
+        if self.DEBUG:
+            problems.append("DEBUG must be false in production.")
+        if self.STORAGE_PROVIDER == "local":
+            problems.append(
+                "STORAGE_PROVIDER=local is a development-only backend. Configure "
+                "S3-compatible storage (STORAGE_PROVIDER=s3 plus STORAGE_ENDPOINT, "
+                "STORAGE_BUCKET, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY)."
+            )
+
+        if problems:
+            raise ValueError(
+                "Invalid production configuration:\n"
+                + "\n".join(f"  * {p}" for p in problems)
+            )
         return self
 
     # ------------------------------------------------------------ computed
