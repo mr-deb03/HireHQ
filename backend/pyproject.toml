@@ -28,6 +28,10 @@ dependencies = [
     "aiosmtplib>=3.0.2",
     "structlog>=24.4.0",
     "sse-starlette>=2.1.0",
+    # Imported directly (middleware, responses, template escaping) rather than only
+    # through FastAPI and Jinja2, so they are declared rather than relied on transitively.
+    "starlette>=0.40.0",
+    "markupsafe>=2.1.5",
     # AES-256-GCM for OAuth tokens at rest; a weaker fallback is used without it.
     "cryptography>=43.0.0",
     "anthropic>=0.40.0",

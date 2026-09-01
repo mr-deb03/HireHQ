@@ -14,18 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-# Dependencies resolve into their own layer, so application edits do not
-# invalidate the (slow) dependency install.
-RUN python -m venv /opt/venv \
+# Dependencies are read out of pyproject.toml rather than repeated here. A second,
+# hand-maintained copy of the list drifts silently: a package added for a new feature
+# works locally and in the tests, then the container dies on import at deploy time - which
+# is exactly how 'sse-starlette' and 'cryptography' went missing from this image. Only
+# pyproject.toml is copied at this point, so the slow dependency layer is still cached
+# across application edits. Environment markers (tzdata's win32 guard) are honoured by pip,
+# and optional-dependencies - the dev/test tools - are deliberately not installed.
+RUN python -c "import tomllib,pathlib;d=tomllib.load(open('pyproject.toml','rb'))['project']['dependencies'];pathlib.Path('requirements.txt').write_text(chr(10).join(d))" \
+    && cat requirements.txt \
+    && python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install \
-        "fastapi>=0.115" "uvicorn[standard]>=0.32" "pydantic>=2.9" \
-        "pydantic-settings>=2.6" "email-validator>=2.2" \
-        "sqlalchemy[asyncio]>=2.0.36" "alembic>=1.14" "asyncpg>=0.30" \
-        "aiosqlite>=0.20" "greenlet>=3.1" "redis>=5.2" "arq>=0.26" \
-        "bcrypt>=4.2" "pyjwt>=2.10" "python-multipart>=0.0.12" \
-        "httpx>=0.27" "aioboto3>=13.2" "pypdf>=5.1" "python-docx>=1.1.2" \
-        "jinja2>=3.1.4" "aiosmtplib>=3.0" "structlog>=24.4" "anthropic>=0.40"
+    && /opt/venv/bin/pip install -r requirements.txt
 
 # ------------------------------------------------------------------ runtime
 FROM python:3.12-slim AS runtime
