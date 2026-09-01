@@ -1,0 +1,184 @@
+# HireHQ - full stack.
+#
+#   docker compose up --build
+#
+# Brings up PostgreSQL, Redis, the API, the background worker, MinIO (S3-compatible
+# storage) and the Next.js frontend. Migrations and seeding run automatically on first
+# start via the `migrate` service, so `docker compose up` gives a working, populated
+# product rather than an empty schema.
+
+name: hirehq
+
+services:
+  # ------------------------------------------------------------------ database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hirehq
+      POSTGRES_PASSWORD: hirehq
+      POSTGRES_DB: hirehq
+      # Deterministic collation, so ORDER BY behaves identically everywhere.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hirehq -d hirehq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------- cache
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------- storage
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: hirehq
+      MINIO_ROOT_PASSWORD: hirehq-secret
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Creates the bucket once MinIO is up, then exits.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 hirehq hirehq-secret &&
+      mc mb --ignore-existing local/hirehq &&
+      mc anonymous set none local/hirehq &&
+      echo 'bucket ready (private)'
+      "
+    restart: "no"
+
+  # ---------------------------------------------------------------- migrations
+  # Runs migrations and seeds demo data, then exits. The API and worker wait for it,
+  # so they never start against a schema that does not exist yet.
+  migrate:
+    build:
+      context: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://hirehq:hirehq@postgres:5432/hirehq
+      APP_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "
+      alembic upgrade head &&
+      python -m app.db.seed
+      "
+    restart: "no"
+
+  # ----------------------------------------------------------------------- api
+  api:
+    build:
+      context: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://hirehq:hirehq@postgres:5432/hirehq
+      REDIS_URL: redis://redis:6379/0
+      USE_REDIS_QUEUE: "true"
+      USE_REDIS_CACHE: "true"
+      STORAGE_PROVIDER: s3
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_BUCKET: hirehq
+      STORAGE_ACCESS_KEY: hirehq
+      STORAGE_SECRET_KEY: hirehq-secret
+      BACKEND_BASE_URL: http://localhost:8000
+      FRONTEND_BASE_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000
+      # Compose runs the development profile; production requires a real JWT_SECRET,
+      # S3 storage and DEBUG=false, all enforced at startup.
+      APP_ENV: development
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------- worker
+  worker:
+    build:
+      context: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://hirehq:hirehq@postgres:5432/hirehq
+      REDIS_URL: redis://redis:6379/0
+      USE_REDIS_QUEUE: "true"
+      STORAGE_PROVIDER: s3
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_BUCKET: hirehq
+      STORAGE_ACCESS_KEY: hirehq
+      STORAGE_SECRET_KEY: hirehq-secret
+      APP_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: ["arq", "app.workers.worker.WorkerSettings"]
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ frontend
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

@@ -1,0 +1,107 @@
+# Render Blueprint — defines both backend services in one file.
+#
+# Render reads this from the repository root. Point a Blueprint at your repo and it
+# creates the API and the worker together, already wired to the same secrets.
+#
+# The frontend is NOT here: it goes on Vercel. See DEPLOYMENT.md.
+#
+# Values marked `sync: false` are deliberately not stored in git — Render prompts for
+# them when you create the Blueprint, and they stay in Render's encrypted store.
+
+envVarGroups:
+  # Shared so the API and the worker cannot drift apart. JWT_SECRET in particular MUST
+  # match: it signs sessions and derives the encryption key for stored OAuth tokens, so
+  # two different values would mean the worker cannot decrypt what the API wrote.
+  - name: hirehq-shared
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: LOG_JSON
+        value: "true"
+
+      # Generated once by Render and shared by both services.
+      # Rotating this invalidates every session AND every stored OAuth token.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # ---- infrastructure you provisioned yourself (see DEPLOYMENT.md steps 2-4)
+      # Postgres: must use the +asyncpg driver and must NOT carry ?sslmode=require.
+      - key: DATABASE_URL
+        sync: false
+      # Redis: Upstash gives a rediss:// URL; ARQ reads TLS from that scheme.
+      - key: REDIS_URL
+        sync: false
+
+      - key: USE_REDIS_QUEUE
+        value: "true"
+      - key: USE_REDIS_CACHE
+        value: "true"
+
+      # ---- object storage
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: STORAGE_BUCKET
+        value: hirehq
+      - key: STORAGE_ENDPOINT
+        sync: false
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+      - key: STORAGE_REGION
+        value: auto
+      # Cloudflare R2 encrypts automatically and REJECTS this header, so it is empty
+      # here. For AWS S3 or MinIO set it to AES256 instead.
+      - key: STORAGE_SERVER_SIDE_ENCRYPTION
+        value: ""
+
+      # ---- public origins
+      # This service's own public URL. Render derives it from the service name below, so
+      # unless that name was taken it is https://hirehq-api.onrender.com. It builds the
+      # OAuth redirect_uri for mailbox and calendar connections, so it must be exact.
+      - key: BACKEND_BASE_URL
+        sync: false
+
+      # Both must be the real Vercel URL before the browser can talk to the API.
+      # You will not know it until the frontend is deployed — DEPLOYMENT.md step 8
+      # comes back and sets these.
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+services:
+  # ------------------------------------------------------------------------ API
+  - type: web
+    name: hirehq-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    # Liveness only - it does not touch the database, so a slow query or a sleeping
+    # Neon instance cannot make Render think the service is dead and restart it.
+    healthCheckPath: /health/live
+    envVars:
+      - fromGroup: hirehq-shared
+      # Render injects PORT; the Dockerfile CMD reads it.
+      # Two uvicorn workers fit comfortably in a starter instance's memory. Raise this
+      # with the instance size, not beyond it.
+      - key: WEB_CONCURRENCY
+        value: "2"
+
+  # --------------------------------------------------------------------- worker
+  # Same image, same environment, different start command. Without this: résumés never
+  # parse, ATS scores never appear, reminders never send and mailbox sync never runs.
+  - type: worker
+    name: hirehq-worker
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    dockerCommand: arq app.workers.worker.WorkerSettings
+    envVars:
+      - fromGroup: hirehq-shared

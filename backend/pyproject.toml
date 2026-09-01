@@ -1,0 +1,69 @@
+[project]
+name = "hirehq-backend"
+version = "1.0.0"
+description = "HireHQ - AI-powered hiring & job portal. From Application to Hire - Automated."
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "email-validator>=2.2.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14.0",
+    "asyncpg>=0.30.0",
+    "aiosqlite>=0.20.0",
+    "greenlet>=3.1.0",
+    "redis>=5.2.0",
+    "arq>=0.26.0",
+    "bcrypt>=4.2.0",
+    "pyjwt>=2.10.0",
+    "python-multipart>=0.0.12",
+    "httpx>=0.27.0",
+    "aioboto3>=13.2.0",
+    "pypdf>=5.1.0",
+    "python-docx>=1.1.2",
+    "jinja2>=3.1.4",
+    "aiosmtplib>=3.0.2",
+    "structlog>=24.4.0",
+    "sse-starlette>=2.1.0",
+    # AES-256-GCM for OAuth tokens at rest; a weaker fallback is used without it.
+    "cryptography>=43.0.0",
+    "anthropic>=0.40.0",
+    # Windows has no system tz database; interview timezones and Alembic need one.
+    "tzdata>=2024.2; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4"]
+ignore = [
+    # FastAPI's whole dependency system is function calls in argument defaults.
+    "B008",
+    # Line length is handled by the formatter, not by failing the lint.
+    "E501",
+    # Pydantic generic models (SuccessResponse[T], Page[T]) require the classic
+    # Generic[T] form; PEP 695 type parameters are not supported there.
+    "UP046",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

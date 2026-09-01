@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------- secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.local.example
+
+# ----------------------------------------------------------------- python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --------------------------------------------------------------- database
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# ------------------------------------------------------ uploaded artefacts
+storage/
+backend/storage/
+backend/tests/_test_storage/
+backend/tests/test_*.db
+
+# ------------------------------------------------------------------- node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ------------------------------------------------------------------- misc
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

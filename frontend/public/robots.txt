@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Allow: /jobs
+Disallow: /recruiter/
+Disallow: /candidate/
+Disallow: /admin/
