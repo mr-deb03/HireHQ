@@ -176,6 +176,23 @@ def reset_email_provider() -> None:
     get_email_provider.cache_clear()
 
 
+def email_verification_required() -> bool:
+    """Whether an unverified account should be refused sign-in.
+
+    Requiring verification is only meaningful if the verification link can reach the
+    person: with a provider that records but does not transmit, the link is generated,
+    stored, and never delivered, so the requirement can never be satisfied by anyone.
+    Enforcing it then is not a security control, it is a lockout of every user including
+    the first administrator.
+
+    So the default is to follow the provider's actual capability. ``REQUIRE_EMAIL_
+    VERIFICATION`` overrides it in either direction when you want to decide explicitly.
+    """
+    if settings.REQUIRE_EMAIL_VERIFICATION is not None:
+        return settings.REQUIRE_EMAIL_VERIFICATION
+    return get_email_provider().transmits
+
+
 async def send_email(message: OutgoingEmail) -> DeliveryResult:
     return await get_email_provider().send(message)
 
@@ -186,6 +203,7 @@ __all__ = [
     "EmailProvider",
     "OutgoingEmail",
     "SMTPEmailProvider",
+    "email_verification_required",
     "get_email_provider",
     "reset_email_provider",
     "send_email",

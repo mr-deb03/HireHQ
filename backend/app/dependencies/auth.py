@@ -34,6 +34,7 @@ from app.core.permissions import permissions_for_roles
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.user import User
+from app.providers.email import email_verification_required
 
 #: ``auto_error=False`` so a missing header raises our own envelope-shaped 401 rather
 #: than FastAPI's bare ``{"detail": ...}``.
@@ -126,7 +127,7 @@ async def get_current_user(
     if user is None:
         raise InvalidToken("The account for this token no longer exists")
 
-    if user.status == UserStatus.PENDING_VERIFICATION:
+    if user.status == UserStatus.PENDING_VERIFICATION and email_verification_required():
         raise EmailNotVerified()
     if user.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED):
         raise AccountInactive(f"This account is {user.status.value.lower()}")

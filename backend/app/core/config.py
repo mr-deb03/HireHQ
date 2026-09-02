@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = 48
     PASSWORD_RESET_EXPIRE_MINUTES: int = 60
 
+    #: Whether signing in requires a verified email address.
+    #:
+    #: Unset (the default) means "only when the email provider can actually deliver the
+    #: verification link". Enforcing it while email is not transmitting locks every user
+    #: out permanently - the link is recorded but never arrives, so nobody can ever
+    #: satisfy the requirement. That is a lockout, not a security control.
+    #:
+    #: Set it to true to require verification regardless, or false to never require it.
+    REQUIRE_EMAIL_VERIFICATION: bool | None = None
+
     # -------------------------------------------------------------- storage
     #: ``s3`` (any S3-compatible endpoint) or ``local`` (filesystem, dev only).
     STORAGE_PROVIDER: Literal["s3", "local"] = "local"

@@ -43,8 +43,14 @@ class TestRegistration:
             },
         )
         data = response.json()["data"]
+        # The structured field is the honest signal, and it is what clients act on.
         assert data["verification_email_status"] == "NOT_SENT_NO_PROVIDER"
-        assert "could not be delivered" in data["message"]
+        # The prose must not send anyone to an inbox that will never receive anything.
+        # What it says beyond that depends on whether verification is being enforced at
+        # all, so assert the property rather than one particular sentence.
+        message = data["message"].lower()
+        assert "check your email" not in message, data["message"]
+        assert "sent" not in message, data["message"]
 
     async def test_rejects_a_weak_password(self, client: httpx.AsyncClient):
         response = await client.post(

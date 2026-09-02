@@ -30,7 +30,11 @@ from app.modules.auth.schemas import (
     VerifyEmailRequest,
 )
 from app.modules.auth.service import PURPOSE_EMAIL_VERIFY, AuthService
-from app.providers.email import OutgoingEmail, get_email_provider
+from app.providers.email import (
+    OutgoingEmail,
+    email_verification_required,
+    get_email_provider,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -134,11 +138,19 @@ async def register(
 
     message = "Account created. Check your email to verify your address."
     if email_status != EmailDeliveryStatus.SENT:
-        message = (
-            "Account created. The verification email could not be delivered because no "
-            "email provider is configured on this server - ask an administrator to "
-            "verify your account or configure SMTP."
-        )
+        if email_verification_required():
+            # Verification is enforced but the link did not go out, so the account really
+            # is stuck until someone intervenes. Say so rather than leaving the person
+            # waiting for a message that is never coming.
+            message = (
+                "Account created. The verification email could not be delivered because "
+                "no email provider is configured on this server - ask an administrator "
+                "to verify your account or configure SMTP."
+            )
+        else:
+            # Nothing is gated on verification here, so the account is ready to use. Do
+            # not send people looking for an email that was never required.
+            message = "Account created. You can sign in now."
 
     return SuccessResponse(
         data=RegisterResponse(

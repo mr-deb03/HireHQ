@@ -32,6 +32,7 @@ from app.core.security import (
 )
 from app.models.user import RefreshToken, Role, User, VerificationToken
 from app.modules.auth.schemas import TokenPair
+from app.providers.email import email_verification_required
 from app.services.audit import AuditService
 
 logger = get_logger(__name__)
@@ -77,7 +78,15 @@ class AuthService:
             first_name=first_name.strip(),
             last_name=last_name.strip(),
             phone=phone.strip() if phone else None,
-            status=UserStatus.PENDING_VERIFICATION,
+            # Only park the account as unverified if verification is actually enforced.
+            # Otherwise every account would sit in PENDING_VERIFICATION for good, which
+            # reads as "waiting on the candidate" in every admin view when in fact nothing
+            # is ever going to arrive for them to act on.
+            status=(
+                UserStatus.PENDING_VERIFICATION
+                if email_verification_required()
+                else UserStatus.ACTIVE
+            ),
         )
         user.roles.append(role)
         self.session.add(user)
@@ -149,12 +158,19 @@ class AuthService:
             )
             raise InvalidCredentials()
 
-        if user.status == UserStatus.PENDING_VERIFICATION:
+        if user.status == UserStatus.PENDING_VERIFICATION and email_verification_required():
             from app.core.exceptions import EmailNotVerified
 
             raise EmailNotVerified()
         if user.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED):
             raise AccountInactive(f"This account is {user.status.value.lower()}")
+
+        # Reaching here while still marked PENDING_VERIFICATION means verification is not
+        # being enforced, so the status is describing a wait that will never end. Clear it
+        # on a successful sign-in; accounts created before the setting changed heal
+        # themselves rather than needing a manual fix.
+        if user.status == UserStatus.PENDING_VERIFICATION:
+            user.status = UserStatus.ACTIVE
 
         user.failed_login_attempts = 0
         user.locked_until = None
