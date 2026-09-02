@@ -72,8 +72,11 @@ class Department(Base, UUIDMixin, TimestampMixin):
     )
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    # A department has a head, and a user belongs to a department - a reference cycle.
+    # See the note on Application.referral_id: one side has to be added by ALTER TABLE
+    # or PostgreSQL cannot create either table.
     head_user_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL")
+        GUID(), ForeignKey("users.id", ondelete="SET NULL", use_alter=True)
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

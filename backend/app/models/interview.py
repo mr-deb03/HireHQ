@@ -64,8 +64,10 @@ class Interview(Base, UUIDMixin, TenantMixin, TimestampMixin):
     organiser_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+    # An interview points at the calendar event it created, and the event points back at
+    # the interview - a reference cycle. See the note on Application.referral_id.
     calendar_event_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("calendar_events.id", ondelete="SET NULL")
+        GUID(), ForeignKey("calendar_events.id", ondelete="SET NULL", use_alter=True)
     )
 
     rescheduled_from: Mapped[datetime | None] = mapped_column(UTCDateTime())

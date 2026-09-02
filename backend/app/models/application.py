@@ -62,8 +62,14 @@ class Application(Base, UUIDMixin, TenantMixin, TimestampMixin):
     #: The raw ``?source=`` value plus any UTM parameters, for source analytics (s40).
     source_detail: Mapped[str | None] = mapped_column(String(120))
     utm: Mapped[dict] = mapped_column(JSONType(), default=dict, nullable=False)
+    # ``applications`` and ``referrals`` reference each other: a referral can name the
+    # application it produced, and an application can name the referral it came from.
+    # PostgreSQL requires a referenced table to exist at CREATE TABLE time, so one side
+    # of the cycle must be added afterwards with ALTER TABLE - which is what use_alter
+    # does. Without it the two tables cannot be ordered and the schema fails to build on
+    # PostgreSQL, while SQLite silently accepts it.
     referral_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("referrals.id", ondelete="SET NULL")
+        GUID(), ForeignKey("referrals.id", ondelete="SET NULL", use_alter=True)
     )
 
     #: Denormalised copy of the latest ATS score. The authoritative, versioned record
